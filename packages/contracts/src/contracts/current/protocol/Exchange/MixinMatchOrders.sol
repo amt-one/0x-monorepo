@@ -14,22 +14,19 @@
 pragma solidity ^0.4.24;
 pragma experimental ABIEncoderV2;
 
+import "../../utils/LibBytes/LibBytes.sol";
+import "./libs/LibMath.sol";
+import "./libs/LibOrder.sol";
+import "./libs/LibFillResults.sol";
+import "./libs/LibExchangeErrors.sol";
 import "./mixins/MExchangeCore.sol";
 import "./mixins/MMatchOrders.sol";
 import "./mixins/MSettlement.sol";
 import "./mixins/MTransactions.sol";
-import "../../utils/SafeMath/SafeMath.sol";
-import "./libs/LibMath.sol";
-import "./libs/LibOrder.sol";
-import "./libs/LibStatus.sol";
-import "../../utils/LibBytes/LibBytes.sol";
-import "./libs/LibExchangeErrors.sol";
 
 contract MixinMatchOrders is
-    SafeMath,
     LibBytes,
     LibMath,
-    LibStatus,
     LibOrder,
     LibFillResults,
     LibExchangeErrors,
@@ -72,8 +69,6 @@ contract MixinMatchOrders is
         matchedFillResults = calculateMatchedFillResults(
             leftOrder,
             rightOrder,
-            leftOrderInfo.orderStatus,
-            rightOrderInfo.orderStatus,
             leftOrderInfo.orderTakerAssetFilledAmount,
             rightOrderInfo.orderTakerAssetFilledAmount
         );
@@ -81,19 +76,17 @@ contract MixinMatchOrders is
         // Validate fill contexts
         assertValidFill(
             leftOrder,
-            leftOrderInfo.orderStatus,
-            leftOrderInfo.orderHash,
+            leftOrderInfo,
             takerAddress,
-            leftOrderInfo.orderTakerAssetFilledAmount,
+            matchedFillResults.left.takerAssetFilledAmount,
             matchedFillResults.left.takerAssetFilledAmount,
             leftSignature
         );
         assertValidFill(
             rightOrder,
-            rightOrderInfo.orderStatus,
-            rightOrderInfo.orderHash,
+            rightOrderInfo,
             takerAddress,
-            rightOrderInfo.orderTakerAssetFilledAmount,
+            matchedFillResults.right.takerAssetFilledAmount,
             matchedFillResults.right.takerAssetFilledAmount,
             rightSignature
         );
@@ -201,16 +194,12 @@ contract MixinMatchOrders is
     ///      The profit made by the leftOrder order goes to the taker (who matched the two orders).
     /// @param leftOrder First order to match.
     /// @param rightOrder Second order to match.
-    /// @param leftOrderStatus Order status of left order.
-    /// @param rightOrderStatus Order status of right order.
     /// @param leftOrderFilledAmount Amount of left order already filled.
     /// @param rightOrderFilledAmount Amount of right order already filled.
     /// @param matchedFillResults Amounts to fill and fees to pay by maker and taker of matched orders.
     function calculateMatchedFillResults(
         Order memory leftOrder,
         Order memory rightOrder,
-        uint8 leftOrderStatus,
-        uint8 rightOrderStatus,
         uint256 leftOrderFilledAmount,
         uint256 rightOrderFilledAmount
     )
@@ -258,28 +247,15 @@ contract MixinMatchOrders is
         }
 
         // Calculate fill results for left order
-        uint8 status;
-        (status, matchedFillResults.left) = calculateFillResults(
+        matchedFillResults.left = calculateFillResults(
             leftOrder,
-            leftOrderStatus,
-            leftOrderFilledAmount,
             leftOrderAmountToFill
-        );
-        require(
-            status == uint8(Status.SUCCESS),
-            FAILED_TO_CALCULATE_FILL_RESULTS_FOR_LEFT_ORDER
         );
 
         // Calculate fill results for right order
-        (status, matchedFillResults.right) = calculateFillResults(
+        matchedFillResults.right = calculateFillResults(
             rightOrder,
-            rightOrderStatus,
-            rightOrderFilledAmount,
             rightOrderAmountToFill
-        );
-        require(
-            status == uint8(Status.SUCCESS),
-            FAILED_TO_CALCULATE_FILL_RESULTS_FOR_RIGHT_ORDER
         );
 
         // Calculate amount given to taker

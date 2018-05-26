@@ -26,6 +26,9 @@ contract LibExchangeErrors {
     string constant INVALID_SENDER = "Invalid `msg.sender`.";
     string constant INVALID_CONTEXT = "Function called in an invalid context.";
     string constant INVALID_NEW_MAKER_EPOCH = "Specified salt must be greater than or equal to existing makerEpoch.";
+    string constant ORDER_UNFILLABLE = "Order cannot be filled.";
+    string constant ROUNDING_ERROR_TOO_LARGE = "Rounding error greater than 0.1%.";
+    string constant TAKER_ASSET_FILL_AMOUNT_TOO_LOW = "Fill amount cannot equal 0.";
 
     // Order revert reasons
     string constant INVALID_ORDER_TAKER_ASSET_AMOUNT = "Invalid order taker asset amount: expected a non-zero value.";
@@ -55,6 +58,4 @@ contract LibExchangeErrors {
     string constant NEGATIVE_SPREAD = "Matched orders must have a positive spread.";
     string constant MISCALCULATED_TRANSFER_AMOUNTS = "A miscalculation occurred: the left maker would receive more than the right maker would spend.";
     string constant ROUNDING_ERROR_TRANSFER_AMOUNTS = "A rounding error occurred when calculating transfer amounts for matched orders.";
-    string constant FAILED_TO_CALCULATE_FILL_RESULTS_FOR_LEFT_ORDER = "Failed to calculate fill results for left order.";
-    string constant FAILED_TO_CALCULATE_FILL_RESULTS_FOR_RIGHT_ORDER = "Failed to calculate fill results for right order.";
 }

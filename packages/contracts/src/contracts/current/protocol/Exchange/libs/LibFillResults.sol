@@ -50,19 +50,4 @@ contract LibFillResults is
         totalFillResults.makerFeePaid = safeAdd(totalFillResults.makerFeePaid, singleFillResults.makerFeePaid);
         totalFillResults.takerFeePaid = safeAdd(totalFillResults.takerFeePaid, singleFillResults.takerFeePaid);
     }
-
-    /// @dev Returns a null fill results struct
-    function getNullFillResults()
-        internal
-        pure
-        returns (FillResults memory)
-    {
-        // returns zeroed out FillResults instance
-        return FillResults({
-            makerAssetFilledAmount: 0,
-            takerAssetFilledAmount: 0,
-            makerFeePaid: 0,
-            takerFeePaid: 0
-        });
-    }
 }

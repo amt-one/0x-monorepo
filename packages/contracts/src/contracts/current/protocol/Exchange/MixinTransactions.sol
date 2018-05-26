@@ -17,9 +17,9 @@
 */
 pragma solidity ^0.4.24;
 
+import "./libs/LibExchangeErrors.sol";
 import "./mixins/MSignatureValidator.sol";
 import "./mixins/MTransactions.sol";
-import "./libs/LibExchangeErrors.sol";
 
 contract MixinTransactions is
     LibExchangeErrors,

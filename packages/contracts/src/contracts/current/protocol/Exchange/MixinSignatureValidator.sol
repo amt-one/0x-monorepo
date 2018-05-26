@@ -18,10 +18,10 @@
 
 pragma solidity ^0.4.24;
 
+import "../../utils/LibBytes/LibBytes.sol";
+import "./libs/LibExchangeErrors.sol";
 import "./mixins/MSignatureValidator.sol";
 import "./interfaces/ISigner.sol";
-import "./libs/LibExchangeErrors.sol";
-import "../../utils/LibBytes/LibBytes.sol";
 
 contract MixinSignatureValidator is
     LibBytes,
