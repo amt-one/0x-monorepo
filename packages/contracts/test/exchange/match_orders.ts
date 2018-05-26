@@ -13,7 +13,6 @@ import { ERC721ProxyContract } from '../../src/contract_wrappers/generated/e_r_c
 import {
     CancelContractEventArgs,
     ExchangeContract,
-    ExchangeStatusContractEventArgs,
     FillContractEventArgs,
 } from '../../src/contract_wrappers/generated/exchange';
 import { artifacts } from '../../src/utils/artifacts';
@@ -76,12 +75,6 @@ describe('matchOrders', () => {
 
     let matchOrderTester: MatchOrderTester;
 
-    before(async () => {
-        await blockchainLifecycle.startAsync();
-    });
-    after(async () => {
-        await blockchainLifecycle.revertAsync();
-    });
     before(async () => {
         // Create accounts
         const accounts = await web3Wrapper.getAvailableAddressesAsync();
