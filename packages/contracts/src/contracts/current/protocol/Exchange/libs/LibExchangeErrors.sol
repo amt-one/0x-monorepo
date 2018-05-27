@@ -51,7 +51,7 @@ contract LibExchangeErrors is
         COMPLETE_FILL_FAILED,      // Desired takerAssetFillAmount could not be completely filled. (bytes32 orderHash)
 
         /// matchOrders errors ///
-        POSITIVE_SPREAD_REQUIRED,  // Matched orders must have a negative spread.
+        NEGATIVE_SPREAD_REQUIRED,  // Matched orders must have a negative spread.
 
         /// Transaction errors ///
         REENTRANCY_ILLEGAL,        // (bytes32 transactionHash)

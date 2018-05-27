@@ -55,6 +55,11 @@ contract MixinMatchOrders is
         public
         returns (MatchedFillResults memory matchedFillResults)
     {
+        // We assume that rightOrder.takerAssetData == leftOrder.makerAssetData and rightOrder.makerAssetData == leftOrder.takerAssetData.
+        // If this assumption isn't true, the match will fail at signature validation.
+        rightOrder.takerAssetData = leftOrder.makerAssetData;
+        rightOrder.makerAssetData = leftOrder.takerAssetData;
+
         // Get left & right order info
         OrderInfo memory leftOrderInfo = getOrderInfo(leftOrder);
         OrderInfo memory rightOrderInfo = getOrderInfo(rightOrder);
@@ -72,6 +77,9 @@ contract MixinMatchOrders is
             leftOrderInfo.orderTakerAssetFilledAmount,
             rightOrderInfo.orderTakerAssetFilledAmount
         );
+
+        // Ensure match results are valid
+        // assertValidMatchResults(matchedFillResults);
 
         // Validate fill contexts
         assertValidFill(
@@ -126,21 +134,8 @@ contract MixinMatchOrders is
         Order memory rightOrder
     )
         internal
+        view
     {
-        // The leftOrder maker asset must be the same as the rightOrder taker asset.
-        // TODO: Can we safely assume equality and expect a later failure otherwise?
-        require(
-            areBytesEqual(leftOrder.makerAssetData, rightOrder.takerAssetData),
-            ASSET_MISMATCH_MAKER_TAKER
-        );
-
-        // The leftOrder taker asset must be the same as the rightOrder maker asset.
-        // TODO: Can we safely assume equality and expect a later failure otherwise?
-        require(
-            areBytesEqual(leftOrder.takerAssetData, rightOrder.makerAssetData),
-            ASSET_MISMATCH_TAKER_MAKER
-        );
-
         // Make sure there is a profitable spread.
         // There is a profitable spread iff the cost per unit bought (OrderA.MakerAmount/OrderA.TakerAmount) for each order is greater
         // than the profit per unit sold of the matched order (OrderB.TakerAmount/OrderB.MakerAmount).
@@ -152,41 +147,46 @@ contract MixinMatchOrders is
         require(
             safeMul(leftOrder.makerAssetAmount, rightOrder.makerAssetAmount) >=
             safeMul(leftOrder.takerAssetAmount, rightOrder.takerAssetAmount),
-            NEGATIVE_SPREAD
+            encodeErrorBytes32Bytes32(
+                uint8(ExchangeError.NEGATIVE_SPREAD_REQUIRED),
+                getOrderHash(leftOrder),
+                getOrderHash(rightOrder)
+            )
         );
     }
 
     /// @dev Validates matched fill results. Succeeds or throws.
     /// @param matchedFillResults Amounts to fill and fees to pay by maker and taker of matched orders.
-    function assertValidMatchResults(MatchedFillResults memory matchedFillResults)
-        internal
-    {
-        // If the amount transferred from the left order is different than what is transferred, it is a rounding error amount.
-        // Ensure this difference is negligible by dividing the values with each other. The result should equal to ~1.
-        uint256 amountSpentByLeft = safeAdd(
-            matchedFillResults.right.takerAssetFilledAmount,
-            matchedFillResults.takerFillAmount
-        );
-        require(
-            !isRoundingError(
-                matchedFillResults.left.makerAssetFilledAmount,
-                amountSpentByLeft,
-                1
-            ),
-            ROUNDING_ERROR_TRANSFER_AMOUNTS
-        );
+    // function assertValidMatchResults(MatchedFillResults memory matchedFillResults)
+    //     internal
+    //     pure
+    // {
+    //     // If the amount transferred from the left order is different than what is transferred, it is a rounding error amount.
+    //     // Ensure this difference is negligible by dividing the values with each other. The result should equal to ~1.
+    //     uint256 leftMakerAssetFilledAmount = safeAdd(
+    //         matchedFillResults.right.takerAssetFilledAmount,
+    //         matchedFillResults.leftMakerAssetSpreadAmount
+    //     );
+    //     require(
+    //         !isRoundingError(
+    //             matchedFillResults.left.makerAssetFilledAmount,
+    //             leftMakerAssetFilledAmount,
+    //             1
+    //         ),
+    //         encodeError(uint8(ExchangeError.ROUNDING_ERROR))
+    //     );
 
-        // If the amount transferred from the right order is different than what is transferred, it is a rounding error amount.
-        // Ensure this difference is negligible by dividing the values with each other. The result should equal to ~1.
-        require(
-            !isRoundingError(
-                matchedFillResults.right.makerAssetFilledAmount,
-                matchedFillResults.left.takerAssetFilledAmount,
-                1
-            ),
-            ROUNDING_ERROR_TRANSFER_AMOUNTS
-        );
-    }
+    //     // If the amount transferred from the right order is different than what is transferred, it is a rounding error amount.
+    //     // Ensure this difference is negligible by dividing the values with each other. The result should equal to ~1.
+    //     require(
+    //         !isRoundingError(
+    //             matchedFillResults.right.makerAssetFilledAmount,
+    //             matchedFillResults.left.takerAssetFilledAmount,
+    //             1
+    //         ),
+    //         encodeError(uint8(ExchangeError.ROUNDING_ERROR))
+    //     );
+    // }
 
     /// @dev Calculates fill amounts for the matched orders.
     ///      Each order is filled at their respective price point. However, the calculations are
@@ -194,16 +194,17 @@ contract MixinMatchOrders is
     ///      The profit made by the leftOrder order goes to the taker (who matched the two orders).
     /// @param leftOrder First order to match.
     /// @param rightOrder Second order to match.
-    /// @param leftOrderFilledAmount Amount of left order already filled.
-    /// @param rightOrderFilledAmount Amount of right order already filled.
+    /// @param leftOrderTakerAssetFilledAmount Amount of left order already filled.
+    /// @param rightOrderTakerAssetFilledAmount Amount of right order already filled.
     /// @param matchedFillResults Amounts to fill and fees to pay by maker and taker of matched orders.
     function calculateMatchedFillResults(
         Order memory leftOrder,
         Order memory rightOrder,
-        uint256 leftOrderFilledAmount,
-        uint256 rightOrderFilledAmount
+        uint256 leftOrderTakerAssetFilledAmount,
+        uint256 rightOrderTakerAssetFilledAmount
     )
         internal
+        pure
         returns (MatchedFillResults memory matchedFillResults)
     {
         // We settle orders at the exchange rate of the right order.
@@ -215,57 +216,54 @@ contract MixinMatchOrders is
         //          <leftTakerAssetAmountRemaining> <= <rightTakerAssetAmountRemaining> * <rightMakerToTakerRatio>
         //          <leftTakerAssetAmountRemaining> <= <rightTakerAssetAmountRemaining> * <rightOrder.makerAssetAmount> / <rightOrder.takerAssetAmount>
         //          <leftTakerAssetAmountRemaining> * <rightOrder.takerAssetAmount> <= <rightTakerAssetAmountRemaining> * <rightOrder.makerAssetAmount>
-        uint256 rightTakerAssetAmountRemaining = safeSub(rightOrder.takerAssetAmount, rightOrderFilledAmount);
-        uint256 leftTakerAssetAmountRemaining = safeSub(leftOrder.takerAssetAmount, leftOrderFilledAmount);
-        uint256 leftOrderAmountToFill;
-        uint256 rightOrderAmountToFill;
+        uint256 rightTakerAssetAmountRemaining = safeSub(rightOrder.takerAssetAmount, rightOrderTakerAssetFilledAmount);
+        uint256 leftTakerAssetAmountRemaining = safeSub(leftOrder.takerAssetAmount, leftOrderTakerAssetFilledAmount);
+        uint256 leftTakerAssetFilledAmount;
+        uint256 rightTakerAssetFilledAmount;
         if (
             safeMul(leftTakerAssetAmountRemaining, rightOrder.takerAssetAmount) <=
             safeMul(rightTakerAssetAmountRemaining, rightOrder.makerAssetAmount)
         ) {
             // Left order will be fully filled: maximally fill left
-            leftOrderAmountToFill = leftTakerAssetAmountRemaining;
+            leftTakerAssetFilledAmount = leftTakerAssetAmountRemaining;
 
             // The right order receives an amount proportional to how much was spent.
             // TODO: Can we ensure rounding error is in the correct direction?
-            rightOrderAmountToFill = safeGetPartialAmount(
+            rightTakerAssetFilledAmount = getPartialAmount(
                 rightOrder.takerAssetAmount,
                 rightOrder.makerAssetAmount,
-                leftOrderAmountToFill
+                leftTakerAssetFilledAmount
             );
         } else {
             // Right order will be fully filled: maximally fill right
-            rightOrderAmountToFill = rightTakerAssetAmountRemaining;
+            rightTakerAssetFilledAmount = rightTakerAssetAmountRemaining;
 
             // The left order receives an amount proportional to how much was spent.
             // TODO: Can we ensure rounding error is in the correct direction?
-            leftOrderAmountToFill = safeGetPartialAmount(
+            leftTakerAssetFilledAmount = getPartialAmount(
                 rightOrder.makerAssetAmount,
                 rightOrder.takerAssetAmount,
-                rightOrderAmountToFill
+                rightTakerAssetFilledAmount
             );
         }
 
         // Calculate fill results for left order
         matchedFillResults.left = calculateFillResults(
             leftOrder,
-            leftOrderAmountToFill
+            leftTakerAssetFilledAmount
         );
 
         // Calculate fill results for right order
         matchedFillResults.right = calculateFillResults(
             rightOrder,
-            rightOrderAmountToFill
+            rightTakerAssetFilledAmount
         );
 
         // Calculate amount given to taker
-        matchedFillResults.takerFillAmount = safeSub(
+        matchedFillResults.leftMakerAssetSpreadAmount = safeSub(
             matchedFillResults.left.makerAssetFilledAmount,
             matchedFillResults.right.takerAssetFilledAmount
         );
-
-        // Validate the fill results
-        assertValidMatchResults(matchedFillResults);
 
         // Return fill results
         return matchedFillResults;
