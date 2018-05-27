@@ -34,7 +34,7 @@ contract LibFillResults is
     struct MatchedFillResults {
         LibFillResults.FillResults left;
         LibFillResults.FillResults right;
-        uint256 takerFillAmount;
+        uint256 leftMakerAssetSpreadAmount;
     }
 
     /// @dev Adds properties of both FillResults instances.

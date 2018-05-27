@@ -46,28 +46,39 @@ contract MixinTransactions is
         bytes signature)
         external
     {
-        // Prevent reentrancy
-        require(currentContextAddress == address(0));
-
         // Calculate transaction hash
-        bytes32 transactionHash = keccak256(
+        bytes32 transactionHash = keccak256(abi.encodePacked(
             address(this),
             salt,
             data
-        );
+        ));
+
+        // Prevent reentrancy
+        require(
+            currentContextAddress == address(0),
+            encodeErrorBytes32(
+                uint8(ExchangeError.REENTRANCY_ILLEGAL),
+                transactionHash
+            ));
 
         // Validate transaction has not been executed
         require(
             !transactions[transactionHash],
-            DUPLICATE_TRANSACTION_HASH
+            encodeErrorBytes32(
+                uint8(ExchangeError.INVALID_TX_HASH),
+                transactionHash
+            )
         );
 
-        // TODO: is SignatureType.Caller necessary if we make this check?
+        // Transaction always valid if signer is sender of transaction
         if (signer != msg.sender) {
             // Validate signature
             require(
                 isValidSignature(transactionHash, signer, signature),
-                SIGNATURE_VALIDATION_FAILED
+                encodeErrorBytes32(
+                    uint8(ExchangeError.INVALID_TX_SIGNATURE),
+                    transactionHash
+                )
             );
 
             // Set the current transaction signer
@@ -78,7 +89,10 @@ contract MixinTransactions is
         transactions[transactionHash] = true;
         require(
             address(this).delegatecall(data),
-            TRANSACTION_EXECUTION_FAILED
+            encodeErrorBytes32(
+                uint8(ExchangeError.FAILED_EXECUTION),
+                transactionHash
+            )
         );
 
         // Reset current transaction signer

@@ -18,44 +18,54 @@
 
 pragma solidity ^0.4.24;
 
-contract LibExchangeErrors {
+import "../../../utils/LibErrorEncoder/LibErrorEncoder.sol";
 
-    // Core revert reasons
-    string constant GT_ZERO_AMOUNT_REQUIRED = "Amount must be greater than 0.";
-    string constant SIGNATURE_VALIDATION_FAILED = "Signature validation failed.";
-    string constant INVALID_SENDER = "Invalid `msg.sender`.";
-    string constant INVALID_CONTEXT = "Function called in an invalid context.";
-    string constant INVALID_NEW_MAKER_EPOCH = "Specified salt must be greater than or equal to existing makerEpoch.";
-    string constant ORDER_UNFILLABLE = "Order cannot be filled.";
-    string constant ROUNDING_ERROR_TOO_LARGE = "Rounding error greater than 0.1%.";
-    string constant TAKER_ASSET_FILL_AMOUNT_TOO_LOW = "Fill amount cannot equal 0.";
+contract LibExchangeErrors is
+    LibErrorEncoder
+{
 
-    // Order revert reasons
-    string constant INVALID_ORDER_TAKER_ASSET_AMOUNT = "Invalid order taker asset amount: expected a non-zero value.";
-    string constant INVALID_ORDER_MAKER_ASSET_AMOUNT = "Invalid order maker asset amount: expected a non-zero value.";
+    // General Exchange error codes
+    enum ExchangeError {
+    
+        /// Order validation errors ///
+        ORDER_UNFILLABLE,          // Order cannot be filled. (uint8 orderStatus, bytes32 orderHash)
+        INVALID_MAKER,             // Invalid makerAddress. (bytes32 orderHash)
+        INVALID_TAKER,             // Invalid takerAddress. (bytes32 orderHash)
+        INVALID_SENDER,            // Invalid `msg.sender`. (bytes32 orderHash)
+        INVALID_ORDER_SIGNATURE,   //
+        ASSET_DATA_MISMATCH,       // Asset data must be the same for each order. (bytes32 orderHash)
+        
+        /// fillOrder validation errors ///
+        INVALID_TAKER_AMOUNT,      // takerAssetFillAmount cannot equal 0. (bytes32 orderHash)
+        ROUNDING_ERROR,            // Rounding error greater than 0.1% of takerAssetFillAmount. (uint256 takerAssetFilledAmount, bytes32 orderHash)
+        
+        /// Signature validation errors ///
+        INVALID_SIGNATURE,         // Signature validation failed. (byte32 orderHash)
+        SIGNATURE_ILLEGAL,         // Signature type is illegal.
+        SIGNATURE_UNSUPPORTED,     // Signature type unsupported.
+        
+        /// cancelOrdersUptTo errors ///
+        INVALID_NEW_MAKER_EPOCH,   // Specified salt must be greater than or equal to existing makerEpoch. (uint256 oldMakerEpoch)
 
-    // Transaction revert reasons
-    string constant DUPLICATE_TRANSACTION_HASH = "Transaction has already been executed.";
-    string constant TRANSACTION_EXECUTION_FAILED = "Transaction execution failed.";
+        /// fillOrKillOrder errors ///
+        COMPLETE_FILL_FAILED,      // Desired takerAssetFillAmount could not be completely filled. (bytes32 orderHash)
 
-    // Wrapper revert reasons
-    string constant COMPLETE_FILL_FAILED = "Desired fill amount could not be completely filled.";
-    string constant ASSET_DATA_MISMATCH = "Asset data must be the same for each order.";
+        /// matchOrders errors ///
+        POSITIVE_SPREAD_REQUIRED,  // Matched orders must have a negative spread.
 
-    // Asset proxy dispatcher revert reasons
-    string constant GT_ZERO_LENGTH_REQUIRED = "Length must be greater than 0.";
-    string constant OLD_ASSET_PROXY_MISMATCH = "Old asset proxy does not match asset proxy at given id.";
-    string constant NEW_ASSET_PROXY_MISMATCH = "New asset proxy id does not match given id.";
+        /// Transaction errors ///
+        REENTRANCY_ILLEGAL,        // (bytes32 transactionHash)
+        INVALID_TX_HASH,           // Transaction has already been executed. (bytes32 transactionHash)
+        INVALID_TX_SIGNATURE,      //
+        FAILED_EXECUTION,          // Transaction execution failed. (bytes32 transactionHash)
+        
+        /// registerAssetProxy errors ///
+        ASSET_PROXY_MISMATCH,      // oldAssetProxy proxy does not match currentAssetProxy. (address currentAssetProxy)
+        ASSET_PROXY_ID_MISMATCH,   // newAssetProxyId does not match given assetProxyId.
 
-    // Signature validator revert reasons
-    string constant INVALID_SIGNATURE_LENGTH = "Invalid signature length.";
-    string constant ILLEGAL_SIGNATURE_TYPE = "Illegal signature type.";
-    string constant UNSUPPORTED_SIGNATURE_TYPE = "Unsupported signature type.";
-
-    // Order matching revert reasons
-    string constant ASSET_MISMATCH_MAKER_TAKER = "Left order maker asset is different from right order taker asset.";
-    string constant ASSET_MISMATCH_TAKER_MAKER = "Left order taker asset is different from right order maker asset.";
-    string constant NEGATIVE_SPREAD = "Matched orders must have a positive spread.";
-    string constant MISCALCULATED_TRANSFER_AMOUNTS = "A miscalculation occurred: the left maker would receive more than the right maker would spend.";
-    string constant ROUNDING_ERROR_TRANSFER_AMOUNTS = "A rounding error occurred when calculating transfer amounts for matched orders.";
+        /// Length validation errors ///
+        LENGTH_GT_0_REQUIRED,      // Signature must have a length greater than 0.
+        LENGTH_1_REQUIRED,         // Signature must have a length of 1.
+        LENGTH_66_REQUIRED         // Signature must have a length of 66.
+    }
 }

@@ -55,13 +55,24 @@ contract MixinExchangeCore is
     function cancelOrdersUpTo(uint256 salt)
         external
     {
-        uint256 newMakerEpoch = salt + 1;  // makerEpoch is initialized to 0, so to cancelUpTo we need salt + 1
+        address makerAddress = getCurrentContextAddress();
+
+        // makerEpoch is initialized to 0, so to cancelUpTo we need salt + 1
+        uint256 newMakerEpoch = salt + 1;  
+        uint256 oldMakerEpoch = makerEpoch[makerAddress];
+
+        // Ensure makerEpoch is monotonically increasing
         require(
-            newMakerEpoch > makerEpoch[msg.sender],  // epoch must be monotonically increasing
-            INVALID_NEW_MAKER_EPOCH
+            newMakerEpoch > oldMakerEpoch, 
+            encodeErrorBytes32(
+                uint8(ExchangeError.INVALID_NEW_MAKER_EPOCH),
+                bytes32(oldMakerEpoch)
+            )
         );
-        makerEpoch[msg.sender] = newMakerEpoch;
-        emit CancelUpTo(msg.sender, newMakerEpoch);
+
+        // Update makerEpoch
+        makerEpoch[makerAddress] = newMakerEpoch;
+        emit CancelUpTo(makerAddress, newMakerEpoch);
     }
 
     /// @dev Fills the input order.
@@ -116,7 +127,7 @@ contract MixinExchangeCore is
 
     /// @dev After calling, the order can not be filled anymore.
     ///      Throws if order is invalid or sender does not have permission to cancel.
-    /// @param order Order to cancel. Order must be Status.FILLABLE.
+    /// @param order Order to cancel. Order must be OrderStatus.FILLABLE.
     function cancelOrder(Order memory order)
         public
     {
@@ -124,7 +135,7 @@ contract MixinExchangeCore is
         OrderInfo memory orderInfo = getOrderInfo(order);
 
         // Validate context
-        assertValidCancel(order, orderInfo.orderStatus);
+        assertValidCancel(order, orderInfo);
 
         // Perform cancel
         updateCancelledState(order, orderInfo.orderHash);
@@ -147,7 +158,7 @@ contract MixinExchangeCore is
         // edge cases in the supporting infrastructure because they have
         // an 'infinite' price when computed by a simple division.
         if (order.makerAssetAmount == 0) {
-            orderInfo.orderStatus = uint8(Status.ORDER_INVALID_MAKER_ASSET_AMOUNT);
+            orderInfo.orderStatus = uint8(OrderStatus.ORDER_INVALID_MAKER_ASSET_AMOUNT);
             return orderInfo;
         }
 
@@ -156,41 +167,97 @@ contract MixinExchangeCore is
         // Instead of distinguishing between unfilled and filled zero taker
         // amount orders, we choose not to support them.
         if (order.takerAssetAmount == 0) {
-            orderInfo.orderStatus = uint8(Status.ORDER_INVALID_TAKER_ASSET_AMOUNT);
+            orderInfo.orderStatus = uint8(OrderStatus.ORDER_INVALID_TAKER_ASSET_AMOUNT);
             return orderInfo;
         }
 
         // Validate order expiration
         if (block.timestamp >= order.expirationTimeSeconds) {
-            orderInfo.orderStatus = uint8(Status.ORDER_EXPIRED);
+            orderInfo.orderStatus = uint8(OrderStatus.ORDER_EXPIRED);
             return orderInfo;
         }
 
         // Check if order has been cancelled
         if (cancelled[orderInfo.orderHash]) {
-            orderInfo.orderStatus = uint8(Status.ORDER_CANCELLED);
+            orderInfo.orderStatus = uint8(OrderStatus.ORDER_CANCELLED);
             return orderInfo;
         }
         if (makerEpoch[order.makerAddress] > order.salt) {
-            orderInfo.orderStatus = uint8(Status.ORDER_CANCELLED);
+            orderInfo.orderStatus = uint8(OrderStatus.ORDER_CANCELLED);
             return orderInfo;
         }
 
         // Fetch filled amount and validate order availability
         orderInfo.orderTakerAssetFilledAmount = filled[orderInfo.orderHash];
         if (orderInfo.orderTakerAssetFilledAmount >= order.takerAssetAmount) {
-            orderInfo.orderStatus = uint8(Status.ORDER_FULLY_FILLED);
+            orderInfo.orderStatus = uint8(OrderStatus.ORDER_FULLY_FILLED);
             return orderInfo;
         }
 
         // All other statuses are ruled out: order is Fillable
-        orderInfo.orderStatus = uint8(Status.ORDER_FILLABLE);
+        orderInfo.orderStatus = uint8(OrderStatus.ORDER_FILLABLE);
         return orderInfo;
+    }
+
+    /// @dev Updates state with results of a fill order.
+    /// @param order that was filled.
+    /// @param takerAddress Address of taker who filled the order.
+    /// @param orderTakerAssetFilledAmount Amount of order already filled.
+    /// @return fillResults Amounts filled and fees paid by maker and taker.
+    function updateFilledState(
+        Order memory order,
+        address takerAddress,
+        bytes32 orderHash,
+        uint256 orderTakerAssetFilledAmount,
+        FillResults memory fillResults
+    )
+        internal
+    {
+        // Update state
+        filled[orderHash] = safeAdd(orderTakerAssetFilledAmount, fillResults.takerAssetFilledAmount);
+
+        // Log order
+        emit Fill(
+            order.makerAddress,
+            takerAddress,
+            order.feeRecipientAddress,
+            fillResults.makerAssetFilledAmount,
+            fillResults.takerAssetFilledAmount,
+            fillResults.makerFeePaid,
+            fillResults.takerFeePaid,
+            orderHash,
+            order.makerAssetData,
+            order.takerAssetData
+        );
+    }
+
+    /// @dev Updates state with results of cancelling an order.
+    ///      State is only updated if the order is currently fillable.
+    ///      Otherwise, updating state would have no effect.
+    /// @param order that was cancelled.
+    /// @param orderHash Hash of order that was cancelled.
+    function updateCancelledState(
+        Order memory order,
+        bytes32 orderHash
+    )
+        internal
+    {
+        // Perform cancel
+        cancelled[orderHash] = true;
+
+        // Log cancel
+        emit Cancel(
+            order.makerAddress,
+            order.feeRecipientAddress,
+            orderHash,
+            order.makerAssetData,
+            order.takerAssetData
+        );
     }
 
     /// @dev Validates context for fillOrder. Succeeds or throws.
     /// @param order to be filled.
-    /// @param orderInfo Status, orderHash, and amount already filled of order.
+    /// @param orderInfo OrderStatus, orderHash, and amount already filled of order.
     /// @param takerAddress Address of order taker.
     /// @param takerAssetFillAmount Desired amount of order to fill by taker.
     /// @param takerAssetFilledAmount Amount of takerAsset that will be filled.
@@ -204,25 +271,35 @@ contract MixinExchangeCore is
         bytes memory signature
     )
         internal
+        view
     {
-        // An order can only be filled if its status is FILLABLE;
-        // See LibStatus for a complete description of order statuses.
+        // An order can only be filled if its status is FILLABLE.
         require(
-            orderInfo.orderStatus == uint8(Status.ORDER_FILLABLE),
-            ORDER_UNFILLABLE
+            orderInfo.orderStatus == uint8(OrderStatus.ORDER_FILLABLE),
+            encodeErrorBytes1Bytes32(
+                uint8(ExchangeError.ORDER_UNFILLABLE),
+                bytes1(orderInfo.orderStatus),
+                orderInfo.orderHash
+            )
         );
 
         // Revert if fill amount is invalid
         require(
             takerAssetFillAmount != 0,
-            TAKER_ASSET_FILL_AMOUNT_TOO_LOW
+            encodeErrorBytes32(
+                uint8(ExchangeError.INVALID_TAKER_AMOUNT),
+                orderInfo.orderHash
+            )
         );
 
         // Validate sender is allowed to fill this order
         if (order.senderAddress != address(0)) {
             require(
                 order.senderAddress == msg.sender,
-                INVALID_SENDER
+                encodeErrorBytes32(
+                    uint8(ExchangeError.INVALID_SENDER),
+                    orderInfo.orderHash
+                )
             );
         }
 
@@ -230,7 +307,10 @@ contract MixinExchangeCore is
         if (order.takerAddress != address(0)) {
             require(
                 order.takerAddress == takerAddress,
-                INVALID_CONTEXT
+                encodeErrorBytes32(
+                    uint8(ExchangeError.INVALID_TAKER),
+                    orderInfo.orderHash
+                )
             );
         }
 
@@ -238,7 +318,10 @@ contract MixinExchangeCore is
         if (orderInfo.orderTakerAssetFilledAmount == 0) {
             require(
                 isValidSignature(orderInfo.orderHash, order.makerAddress, signature),
-                SIGNATURE_VALIDATION_FAILED
+                encodeErrorBytes32(
+                    uint8(ExchangeError.INVALID_ORDER_SIGNATURE),
+                    orderInfo.orderHash
+                )
             );
         }
 
@@ -249,7 +332,54 @@ contract MixinExchangeCore is
                 order.takerAssetAmount,
                 order.makerAssetAmount
             ),
-            ROUNDING_ERROR_TOO_LARGE
+            encodeErrorBytes32Bytes32(
+                uint8(ExchangeError.ROUNDING_ERROR),
+                bytes32(takerAssetFilledAmount),
+                orderInfo.orderHash
+            )
+        );
+    }
+
+    /// @dev Validates context for cancelOrder. Succeeds or throws.
+    /// @param order to be cancelled.
+    /// @param orderInfo OrderStatus, orderHash, and amount already filled of order.
+    function assertValidCancel(
+        Order memory order,
+        OrderInfo memory orderInfo
+    )
+        internal
+        view
+    {
+        // Ensure order is valid
+        // An order can only be cancelled if its status is FILLABLE.
+        require(
+            orderInfo.orderStatus == uint8(OrderStatus.ORDER_FILLABLE),
+            encodeErrorBytes1Bytes32(
+                uint8(ExchangeError.ORDER_UNFILLABLE),
+                bytes1(orderInfo.orderStatus),
+                orderInfo.orderHash
+            )
+        );
+
+        // Validate sender is allowed to cancel this order
+        if (order.senderAddress != address(0)) {
+            require(
+                order.senderAddress == msg.sender,
+                encodeErrorBytes32(
+                    uint8(ExchangeError.INVALID_SENDER),
+                    orderInfo.orderHash
+                )
+            );
+        }
+
+        // Validate transaction signed by maker
+        address makerAddress = getCurrentContextAddress();
+        require(
+            order.makerAddress == makerAddress,
+            encodeErrorBytes32(
+                uint8(ExchangeError.INVALID_MAKER),
+                orderInfo.orderHash
+            )
         );
     }
 
@@ -286,94 +416,5 @@ contract MixinExchangeCore is
         );
 
         return fillResults;
-    }
-
-    /// @dev Updates state with results of a fill order.
-    /// @param order that was filled.
-    /// @param takerAddress Address of taker who filled the order.
-    /// @param orderTakerAssetFilledAmount Amount of order already filled.
-    /// @return fillResults Amounts filled and fees paid by maker and taker.
-    function updateFilledState(
-        Order memory order,
-        address takerAddress,
-        bytes32 orderHash,
-        uint256 orderTakerAssetFilledAmount,
-        FillResults memory fillResults
-    )
-        internal
-    {
-        // Update state
-        filled[orderHash] = safeAdd(orderTakerAssetFilledAmount, fillResults.takerAssetFilledAmount);
-
-        // Log order
-        emit Fill(
-            order.makerAddress,
-            takerAddress,
-            order.feeRecipientAddress,
-            fillResults.makerAssetFilledAmount,
-            fillResults.takerAssetFilledAmount,
-            fillResults.makerFeePaid,
-            fillResults.takerFeePaid,
-            orderHash,
-            order.makerAssetData,
-            order.takerAssetData
-        );
-    }
-
-    /// @dev Validates context for cancelOrder. Succeeds or throws.
-    /// @param order to be cancelled.
-    /// @param orderStatus Status of order to be cancelled.
-    function assertValidCancel(
-        Order memory order,
-        uint8 orderStatus
-    )
-        internal
-    {
-        // Ensure order is valid
-        // An order can only be cancelled if its status is FILLABLE.
-        // See LibStatus for a complete description of order statuses.
-        require(
-            orderStatus == uint8(Status.ORDER_FILLABLE),
-            ORDER_UNFILLABLE
-        );
-
-        // Validate sender is allowed to cancel this order
-        if (order.senderAddress != address(0)) {
-            require(
-                order.senderAddress == msg.sender,
-                INVALID_SENDER
-            );
-        }
-
-        // Validate transaction signed by maker
-        address makerAddress = getCurrentContextAddress();
-        require(
-            order.makerAddress == makerAddress,
-            INVALID_CONTEXT
-        );
-    }
-
-    /// @dev Updates state with results of cancelling an order.
-    ///      State is only updated if the order is currently fillable.
-    ///      Otherwise, updating state would have no effect.
-    /// @param order that was cancelled.
-    /// @param orderHash Hash of order that was cancelled.
-    function updateCancelledState(
-        Order memory order,
-        bytes32 orderHash
-    )
-        internal
-    {
-        // Perform cancel
-        cancelled[orderHash] = true;
-
-        // Log cancel
-        emit Cancel(
-            order.makerAddress,
-            order.feeRecipientAddress,
-            orderHash,
-            order.makerAssetData,
-            order.takerAssetData
-        );
     }
 }

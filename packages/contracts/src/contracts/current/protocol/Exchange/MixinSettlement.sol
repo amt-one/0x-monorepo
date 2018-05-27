@@ -124,7 +124,7 @@ contract MixinSettlement is
             leftOrder.makerAssetData,
             leftOrder.makerAddress,
             takerAddress,
-            matchedFillResults.takerFillAmount
+            matchedFillResults.leftMakerAssetSpreadAmount
         );
 
         // Maker fees

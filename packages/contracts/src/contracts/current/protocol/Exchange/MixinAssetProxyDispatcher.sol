@@ -44,9 +44,13 @@ contract MixinAssetProxyDispatcher is
         onlyOwner
     {
         // Ensure the existing asset proxy is not unintentionally overwritten
+        address currentAssetProxy = address(assetProxies[assetProxyId]);
         require(
-            oldAssetProxy == address(assetProxies[assetProxyId]),
-            OLD_ASSET_PROXY_MISMATCH
+            oldAssetProxy == currentAssetProxy,
+            encodeErrorBytes20(
+                uint8(ExchangeError.ASSET_PROXY_MISMATCH),
+                bytes20(currentAssetProxy)
+            )
         );
 
         IAssetProxy assetProxy = IAssetProxy(newAssetProxy);
@@ -56,7 +60,7 @@ contract MixinAssetProxyDispatcher is
             uint8 newAssetProxyId = assetProxy.getProxyId();
             require(
                 newAssetProxyId == assetProxyId,
-                NEW_ASSET_PROXY_MISMATCH
+                encodeError(uint8(ExchangeError.ASSET_PROXY_ID_MISMATCH))
             );
         }
 
@@ -93,8 +97,8 @@ contract MixinAssetProxyDispatcher is
         if (amount > 0) {
             // Lookup asset proxy
             require(
-                assetMetadata.length >= 1,
-                GT_ZERO_LENGTH_REQUIRED
+                assetMetadata.length > 0,
+                encodeError(uint8(ExchangeError.LENGTH_GT_0_REQUIRED))
             );
             uint8 assetProxyId = uint8(assetMetadata[0]);
             IAssetProxy assetProxy = assetProxies[assetProxyId];

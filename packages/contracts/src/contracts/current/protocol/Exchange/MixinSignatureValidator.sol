@@ -28,6 +28,9 @@ contract MixinSignatureValidator is
     LibExchangeErrors,
     MSignatureValidator
 {
+    // Personal message headers
+    string constant ETH_PERSONAL_MESSAGE = "\x19Ethereum Signed Message:\n32";
+    string constant TREZOR_PERSONAL_MESSAGE = "\x19Ethereum Signed Message:\n\x41";
 
     // Mapping of hash => signer => signed
     mapping(bytes32 => mapping(address => bool)) preSigned;
@@ -44,7 +47,7 @@ contract MixinSignatureValidator is
     {
         require(
             isValidSignature(hash, signer, signature),
-            SIGNATURE_VALIDATION_FAILED
+            encodeError(uint8(ExchangeError.INVALID_SIGNATURE))
         );
         preSigned[hash][signer] = true;
     }
@@ -65,8 +68,8 @@ contract MixinSignatureValidator is
         // TODO: Domain separation: make hash depend on role. (Taker sig should not be valid as maker sig, etc.)
 
         require(
-            signature.length >= 1,
-            INVALID_SIGNATURE_LENGTH
+            signature.length > 0,
+            encodeError(uint8(ExchangeError.LENGTH_GT_0_REQUIRED))
         );
         SignatureType signatureType = SignatureType(uint8(signature[0]));
 
@@ -83,7 +86,7 @@ contract MixinSignatureValidator is
         // also the initialization value for the enum type.
         if (signatureType == SignatureType.Illegal) {
             // NOTE: Reason cannot be assigned to a variable because of https://github.com/ethereum/solidity/issues/4051
-            revert("Illegal signature type.");
+            revert(encodeError(uint8(ExchangeError.SIGNATURE_ILLEGAL)));
 
         // Always invalid signature
         // Like Illegal, this is always implicitly available and therefore
@@ -92,7 +95,7 @@ contract MixinSignatureValidator is
         } else if (signatureType == SignatureType.Invalid) {
             require(
                 signature.length == 1,
-                INVALID_SIGNATURE_LENGTH
+                encodeError(uint8(ExchangeError.LENGTH_1_REQUIRED))
             );
             isValid = false;
             return isValid;
@@ -108,7 +111,7 @@ contract MixinSignatureValidator is
         } else if (signatureType == SignatureType.Caller) {
             require(
                 signature.length == 1,
-                INVALID_SIGNATURE_LENGTH
+                encodeError(uint8(ExchangeError.LENGTH_1_REQUIRED))
             );
             isValid = signer == msg.sender;
             return isValid;
@@ -117,13 +120,13 @@ contract MixinSignatureValidator is
         } else if (signatureType == SignatureType.Ecrecover) {
             require(
                 signature.length == 66,
-                INVALID_SIGNATURE_LENGTH
+                encodeError(uint8(ExchangeError.LENGTH_66_REQUIRED))
             );
             v = uint8(signature[1]);
             r = readBytes32(signature, 2);
             s = readBytes32(signature, 34);
             recovered = ecrecover(
-                keccak256("\x19Ethereum Signed Message:\n32", hash),
+                keccak256(abi.encodePacked(ETH_PERSONAL_MESSAGE, hash)),
                 v,
                 r,
                 s
@@ -135,7 +138,7 @@ contract MixinSignatureValidator is
         } else if (signatureType == SignatureType.EIP712) {
             require(
                 signature.length == 66,
-                INVALID_SIGNATURE_LENGTH
+                encodeError(uint8(ExchangeError.LENGTH_66_REQUIRED))
             );
             v = uint8(signature[1]);
             r = readBytes32(signature, 2);
@@ -155,13 +158,13 @@ contract MixinSignatureValidator is
         } else if (signatureType == SignatureType.Trezor) {
             require(
                 signature.length == 66,
-                INVALID_SIGNATURE_LENGTH
+                encodeError(uint8(ExchangeError.LENGTH_66_REQUIRED))
             );
             v = uint8(signature[1]);
             r = readBytes32(signature, 2);
             s = readBytes32(signature, 34);
             recovered = ecrecover(
-                keccak256("\x19Ethereum Signed Message:\n\x41", hash),
+                keccak256(abi.encodePacked(TREZOR_PERSONAL_MESSAGE, hash)),
                 v,
                 r,
                 s
@@ -186,6 +189,6 @@ contract MixinSignatureValidator is
         // may lead the caller to incorrectly believe that the
         // signature was invalid.)
         // NOTE: Reason cannot be assigned to a variable because of https://github.com/ethereum/solidity/issues/4051
-        revert("Unsupported signature type.");
+        revert(encodeError(uint8(ExchangeError.SIGNATURE_UNSUPPORTED)));
     }
 }
